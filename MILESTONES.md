@@ -9,10 +9,10 @@
 - [x] Add minimal, buildable Rust crate skeleton.
 
 ## Milestone 1 - CLI Skeleton + SARIF Output
-- Implement CLI entrypoint with input/output options.
-- Emit valid SARIF v2.1.0 using `serde-sarif`.
-- Add deterministic output ordering.
-- Add `--version`, `--help`, `--quiet`, `--timing`.
+- [x] Implement CLI entrypoint with input/output options.
+- [x] Emit valid SARIF v2.1.0 using `serde-sarif`.
+- [x] Add deterministic output ordering.
+- [x] Add `--version`, `--help`, `--quiet`, `--timing`.
 
 ## Milestone 2 - Parsing + Classpath Resolution
 - Implement JAR/class loading and classpath resolution.
@@ -48,3 +48,4 @@
 - Tag `v1.0.0` with release notes.
 - Publish usage examples and SARIF viewer guidance.
 - Document bytecode/JDK compatibility.
+- Setup `release-please` to publish changes to GitHub Releases that enables release immutability.

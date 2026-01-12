@@ -5,6 +5,16 @@ edition = "2021"
 license = "AGPL-3.0-only"
 
 [dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+jclassfile = "0.3.0"
+serde = { version = "1", features = ["derive"] }
+serde-sarif = "0.8.0"
+serde_json = "1"
+zip = "7.0.0"
+
+[dev-dependencies]
+ureq = "2"
 
 [[bin]]
 name = "rtro"
