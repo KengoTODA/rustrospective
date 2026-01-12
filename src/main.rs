@@ -1,5 +1,7 @@
+mod classpath;
 mod scan;
 
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -8,8 +10,11 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use clap::Parser;
 use serde_json::json;
-use serde_sarif::sarif::{Artifact, Invocation, Run, Sarif, Tool, ToolComponent, SCHEMA_URL};
+use serde_sarif::sarif::{
+    Artifact, Invocation, PropertyBag, Run, Sarif, Tool, ToolComponent, SCHEMA_URL,
+};
 
+use crate::classpath::resolve_classpath;
 use crate::scan::scan_inputs;
 
 /// CLI arguments for rtro execution.
@@ -48,9 +53,18 @@ fn run(cli: Cli) -> Result<()> {
     }
 
     let started_at = Instant::now();
+    let scan_started_at = Instant::now();
     let scan = scan_inputs(&cli.input, &cli.classpath)?;
+    let scan_duration_ms = scan_started_at.elapsed().as_millis();
     let artifact_count = scan.artifacts.len();
-    let invocation = build_invocation();
+    let classpath_index = resolve_classpath(&scan.classes)?;
+    let invocation_stats = InvocationStats {
+        scan_duration_ms,
+        class_count: scan.class_count,
+        artifact_count,
+        classpath_class_count: classpath_index.classes.len(),
+    };
+    let invocation = build_invocation(&invocation_stats);
     let sarif = build_sarif(scan.artifacts, invocation);
 
     let mut writer = output_writer(cli.output.as_deref())?;
@@ -62,8 +76,9 @@ fn run(cli: Cli) -> Result<()> {
 
     if cli.timing && !cli.quiet {
         eprintln!(
-            "timing: total_ms={} classes={} artifacts={}",
+            "timing: total_ms={} scan_ms={} classes={} artifacts={}",
             started_at.elapsed().as_millis(),
+            scan_duration_ms,
             scan.class_count,
             artifact_count
         );
@@ -82,14 +97,34 @@ fn output_writer(output: Option<&Path>) -> Result<Box<dyn Write>> {
     }
 }
 
-fn build_invocation() -> Invocation {
+/// Metadata captured for SARIF invocation properties.
+struct InvocationStats {
+    scan_duration_ms: u128,
+    class_count: usize,
+    artifact_count: usize,
+    classpath_class_count: usize,
+}
+
+fn build_invocation(stats: &InvocationStats) -> Invocation {
     let arguments: Vec<String> = std::env::args().collect();
     let command_line = arguments.join(" ");
+    let mut properties = BTreeMap::new();
+    properties.insert("rtro.scan_ms".to_string(), json!(stats.scan_duration_ms));
+    properties.insert("rtro.class_count".to_string(), json!(stats.class_count));
+    properties.insert(
+        "rtro.artifact_count".to_string(),
+        json!(stats.artifact_count),
+    );
+    properties.insert(
+        "rtro.classpath_class_count".to_string(),
+        json!(stats.classpath_class_count),
+    );
 
     Invocation::builder()
         .execution_successful(true)
         .arguments(arguments)
         .command_line(command_line)
+        .properties(PropertyBag::builder().additional_properties(properties).build())
         .build()
 }
 
@@ -131,10 +166,12 @@ mod tests {
 
     #[test]
     fn sarif_is_minimal_and_valid_shape() {
-        let invocation = Invocation::builder()
-            .execution_successful(true)
-            .arguments(Vec::<String>::new())
-            .build();
+        let invocation = build_invocation(&InvocationStats {
+            scan_duration_ms: 0,
+            class_count: 0,
+            artifact_count: 0,
+            classpath_class_count: 0,
+        });
         let sarif = build_sarif(Vec::new(), invocation);
         let value = serde_json::to_value(&sarif).expect("serialize SARIF");
 

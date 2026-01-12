@@ -15,10 +15,10 @@
 - [x] Add `--version`, `--help`, `--quiet`, `--timing`.
 
 ## Milestone 2 - Parsing + Classpath Resolution
-- Implement JAR/class loading and classpath resolution.
-- Parse class files via `jclassfile`.
-- Validate missing or duplicate classes.
-- Add timing/profiling for parsing.
+- [x] Implement JAR/class loading and classpath resolution.
+- [x] Parse class files via `jclassfile`.
+- [x] Validate missing or duplicate classes.
+- [x] Add timing/profiling for parsing.
 
 ## Milestone 3 - IR + Call Graph Prototype
 - Define lean IR for methods, bytecode instructions, and basic blocks.
