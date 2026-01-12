@@ -2,122 +2,51 @@
   "$schema": "https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0.json",
   "runs": [
     {
-      "artifacts": [
-        {
-          "length": 270,
-          "location": {
-            "uri": "A.class"
-          }
-        },
-        {
-          "length": 192,
-          "location": {
-            "uri": "B.class"
-          }
-        }
-      ],
       "invocations": [
         {
           "arguments": [],
           "executionSuccessful": true
         }
       ],
-      "results": [
-        {
-          "codeFlows": [
-            {
-              "threadFlows": [
-                {
-                  "locations": [
-                    {
-                      "kinds": [
-                        "call"
-                      ],
-                      "location": {
-                        "logicalLocations": [
-                          {
-                            "kind": "function",
-                            "name": "A.foo()V"
-                          }
-                        ]
-                      }
-                    },
-                    {
-                      "kinds": [
-                        "call"
-                      ],
-                      "location": {
-                        "logicalLocations": [
-                          {
-                            "kind": "function",
-                            "name": "B.<init>()V"
-                          }
-                        ]
-                      }
-                    }
-                  ]
-                }
-              ]
-            }
-          ],
-          "message": {
-            "text": "Call path: A.foo()V -> B.<init>()V"
-          },
-          "ruleId": "CHA_CALL_GRAPH"
-        },
-        {
-          "codeFlows": [
-            {
-              "threadFlows": [
-                {
-                  "locations": [
-                    {
-                      "kinds": [
-                        "call"
-                      ],
-                      "location": {
-                        "logicalLocations": [
-                          {
-                            "kind": "function",
-                            "name": "A.foo()V"
-                          }
-                        ]
-                      }
-                    },
-                    {
-                      "kinds": [
-                        "call"
-                      ],
-                      "location": {
-                        "logicalLocations": [
-                          {
-                            "kind": "function",
-                            "name": "B.bar()V"
-                          }
-                        ]
-                      }
-                    }
-                  ]
-                }
-              ]
-            }
-          ],
-          "message": {
-            "text": "Call path: A.foo()V -> B.bar()V"
-          },
-          "ruleId": "CHA_CALL_GRAPH"
-        }
-      ],
+      "results": [],
       "tool": {
         "driver": {
           "informationUri": "https://github.com/KengoTODA/rustrospective",
           "name": "rustrospective",
           "rules": [
             {
-              "id": "CHA_CALL_GRAPH",
-              "name": "Call graph (CHA)",
+              "id": "DEAD_CODE",
+              "name": "Dead code",
               "shortDescription": {
-                "text": "CHA call graph path"
+                "text": "Unreachable methods detected by call graph"
+              }
+            },
+            {
+              "id": "EMPTY_CATCH",
+              "name": "Empty catch block",
+              "shortDescription": {
+                "text": "Catch blocks with no meaningful instructions"
+              }
+            },
+            {
+              "id": "INEFFECTIVE_EQUALS_HASHCODE",
+              "name": "Ineffective equals/hashCode",
+              "shortDescription": {
+                "text": "Classes with equals without hashCode or vice versa"
+              }
+            },
+            {
+              "id": "INSECURE_API",
+              "name": "Insecure API usage",
+              "shortDescription": {
+                "text": "Calls to insecure process or reflection APIs"
+              }
+            },
+            {
+              "id": "NULLNESS",
+              "name": "Nullness checks",
+              "shortDescription": {
+                "text": "Nullness issues guided by JSpecify annotations"
               }
             }
           ]

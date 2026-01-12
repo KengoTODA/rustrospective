@@ -6,11 +6,16 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use jclassfile::class_file;
 use jclassfile::constant_pool::ConstantPool;
+use jclassfile::methods::MethodFlags;
 use serde_json::Value;
 use serde_sarif::sarif::{Artifact, ArtifactLocation, ArtifactRoles};
 use zip::ZipArchive;
 
-use crate::ir::{BasicBlock, CallKind, CallSite, Class, Instruction, InstructionKind, Method};
+use crate::cfg::build_cfg;
+use crate::ir::{
+    CallKind, CallSite, Class, ExceptionHandler, Instruction, InstructionKind, Method, MethodAccess,
+};
+use crate::opcodes;
 
 /// Snapshot of parsed artifacts, classes, and counts for a scan.
 pub(crate) struct ScanOutput {
@@ -78,8 +83,9 @@ fn scan_path(
 
     let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
     let roles = if is_input {
-        Some(vec![serde_json::to_value(ArtifactRoles::AnalysisTarget)
-            .expect("serialize artifact role")])
+        Some(vec![
+            serde_json::to_value(ArtifactRoles::AnalysisTarget).expect("serialize artifact role")
+        ])
     } else {
         None
     };
@@ -107,7 +113,8 @@ fn scan_dir(
     for entry in fs::read_dir(path)
         .with_context(|| format!("failed to read directory {}", path.display()))?
     {
-        let entry = entry.with_context(|| format!("failed to read entry under {}", path.display()))?;
+        let entry =
+            entry.with_context(|| format!("failed to read entry under {}", path.display()))?;
         entries.push(entry.path());
     }
 
@@ -136,7 +143,11 @@ fn scan_class_file(
         parse_class_bytes(&data).with_context(|| format!("failed to parse {}", path.display()))?;
     *class_count += 1;
 
-    let artifact_index = push_path_artifact(path, roles, data.len() as u64, None, artifacts)?;
+    let artifact_index = if roles.is_some() {
+        push_path_artifact(path, roles, data.len() as u64, None, artifacts)?
+    } else {
+        -1
+    };
     classes.push(Class {
         name: parsed.name,
         super_name: parsed.super_name,
@@ -154,7 +165,8 @@ fn scan_jar_file(
     class_count: &mut usize,
     classes: &mut Vec<Class>,
 ) -> Result<()> {
-    let file = fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    let file =
+        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     let mut archive =
         ZipArchive::new(file).with_context(|| format!("failed to read {}", path.display()))?;
 
@@ -172,7 +184,11 @@ fn scan_jar_file(
             continue;
         }
         let name = entry.name().to_string();
-        if name.ends_with(".class") && !name.ends_with("module-info.class") {
+        // TODO: Handle multi-release entries under META-INF/versions/ in a future release.
+        if name.ends_with(".class")
+            && !name.ends_with("module-info.class")
+            && !name.starts_with("META-INF/versions/")
+        {
             entry_names.push(name);
         }
     }
@@ -180,6 +196,9 @@ fn scan_jar_file(
     entry_names.sort();
 
     for name in entry_names {
+        if name.starts_with("META-INF/versions/") {
+            continue;
+        }
         let mut entry = archive
             .by_name(&name)
             .with_context(|| format!("failed to read {}:{}", path.display(), name))?;
@@ -191,15 +210,12 @@ fn scan_jar_file(
             .with_context(|| format!("failed to parse {}:{}", path.display(), name))?;
         *class_count += 1;
 
-        let entry_uri = jar_entry_uri(path, &name);
-        let artifact_index =
-            push_artifact(entry_uri, entry.size(), Some(jar_index), None, artifacts);
         classes.push(Class {
             name: parsed.name,
             super_name: parsed.super_name,
             referenced_classes: parsed.referenced_classes,
             methods: parsed.methods,
-            artifact_index,
+            artifact_index: jar_index,
         });
     }
 
@@ -254,11 +270,14 @@ fn push_artifact(
 }
 
 fn path_to_uri(path: &Path) -> String {
-    path.to_string_lossy().to_string()
-}
-
-fn jar_entry_uri(jar_path: &Path, entry_name: &str) -> String {
-    format!("jar:{}!/{}", jar_path.to_string_lossy(), entry_name)
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    };
+    format!("file://{}", absolute.to_string_lossy())
 }
 
 fn path_key(path: &Path) -> String {
@@ -297,7 +316,8 @@ fn expand_classpath(initial: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
 }
 
 fn manifest_classpath(path: &Path) -> Result<Vec<PathBuf>> {
-    let file = fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    let file =
+        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     let mut archive =
         ZipArchive::new(file).with_context(|| format!("failed to read {}", path.display()))?;
     for index in 0..archive.len() {
@@ -385,11 +405,19 @@ struct ParsedClass {
 }
 
 fn parse_class_bytes(data: &[u8]) -> Result<ParsedClass> {
-    let class_file =
-        class_file::parse(data).context("failed to parse class file bytes")?;
+    let class_file = match class_file::parse(data) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            let message = format!("{err}");
+            if message.contains("unmatched attribute") {
+                return parse_class_bytes_minimal(data).context("failed to parse class file bytes");
+            }
+            return Err(err).context("failed to parse class file bytes");
+        }
+    };
     let constant_pool = class_file.constant_pool();
-    let class_name = resolve_class_name(constant_pool, class_file.this_class())
-        .context("resolve class name")?;
+    let class_name =
+        resolve_class_name(constant_pool, class_file.this_class()).context("resolve class name")?;
     let super_name = if class_file.super_class() == 0 {
         None
     } else {
@@ -411,8 +439,8 @@ fn parse_class_bytes(data: &[u8]) -> Result<ParsedClass> {
     }
     referenced.remove(&class_name);
 
-    let methods = parse_methods(constant_pool, class_file.methods())
-        .context("parse method bytecode")?;
+    let methods =
+        parse_methods(constant_pool, class_file.methods()).context("parse method bytecode")?;
 
     Ok(ParsedClass {
         name: class_name,
@@ -456,43 +484,260 @@ fn normalize_class_name(raw: &str) -> Option<String> {
     None
 }
 
-fn parse_methods(constant_pool: &[ConstantPool], methods: &[jclassfile::methods::MethodInfo]) -> Result<Vec<Method>> {
+fn parse_class_bytes_minimal(data: &[u8]) -> Result<ParsedClass> {
+    let mut offset = 0usize;
+    let magic = read_u32_class(data, &mut offset)?;
+    if magic != 0xCAFEBABE {
+        anyhow::bail!("invalid class file magic");
+    }
+    let _minor = read_u16_class(data, &mut offset)?;
+    let _major = read_u16_class(data, &mut offset)?;
+    let (cp_entries, class_entries) = parse_constant_pool_minimal(data, &mut offset)?;
+    let _access_flags = read_u16_class(data, &mut offset)?;
+    let this_class = read_u16_class(data, &mut offset)?;
+    let super_class = read_u16_class(data, &mut offset)?;
+
+    let class_name = resolve_class_name_minimal(&cp_entries, &class_entries, this_class)
+        .context("resolve class name")?;
+    let super_name = if super_class == 0 {
+        None
+    } else {
+        Some(
+            resolve_class_name_minimal(&cp_entries, &class_entries, super_class)
+                .context("resolve super class name")?,
+        )
+    };
+
+    skip_interfaces(data, &mut offset)?;
+    skip_fields(data, &mut offset)?;
+    skip_methods(data, &mut offset)?;
+    skip_attributes(data, &mut offset)?;
+
+    let mut referenced = std::collections::BTreeSet::new();
+    for (index, name_index) in class_entries.iter().enumerate() {
+        if name_index.is_none() {
+            continue;
+        }
+        let name = resolve_class_name_minimal(&cp_entries, &class_entries, index as u16)?;
+        if let Some(normalized) = normalize_class_name(&name) {
+            referenced.insert(normalized);
+        }
+    }
+    referenced.remove(&class_name);
+
+    Ok(ParsedClass {
+        name: class_name,
+        super_name,
+        referenced_classes: referenced.into_iter().collect(),
+        methods: Vec::new(),
+    })
+}
+
+#[derive(Clone)]
+enum CpEntryMin {
+    Utf8(String),
+    Other,
+}
+
+fn parse_constant_pool_minimal(
+    data: &[u8],
+    offset: &mut usize,
+) -> Result<(Vec<CpEntryMin>, Vec<Option<u16>>)> {
+    let count = read_u16_class(data, offset)?;
+    let mut entries = Vec::with_capacity(count as usize);
+    entries.push(CpEntryMin::Other);
+    let mut class_entries = vec![None; count as usize];
+    let mut index = 1u16;
+    while index < count {
+        let tag = read_u8_class(data, offset)?;
+        match tag {
+            1 => {
+                let len = read_u16_class(data, offset)? as usize;
+                let bytes = read_bytes_class(data, offset, len)?;
+                let value = String::from_utf8_lossy(bytes).to_string();
+                entries.push(CpEntryMin::Utf8(value));
+            }
+            7 => {
+                let name_index = read_u16_class(data, offset)?;
+                entries.push(CpEntryMin::Other);
+                class_entries[index as usize] = Some(name_index);
+            }
+            3 | 4 => {
+                skip_class_bytes(data, offset, 4)?;
+                entries.push(CpEntryMin::Other);
+            }
+            5 | 6 => {
+                skip_class_bytes(data, offset, 8)?;
+                entries.push(CpEntryMin::Other);
+                entries.push(CpEntryMin::Other);
+                index += 1;
+            }
+            8 => {
+                skip_class_bytes(data, offset, 2)?;
+                entries.push(CpEntryMin::Other);
+            }
+            9 | 10 | 11 | 12 | 18 => {
+                skip_class_bytes(data, offset, 4)?;
+                entries.push(CpEntryMin::Other);
+            }
+            15 => {
+                skip_class_bytes(data, offset, 3)?;
+                entries.push(CpEntryMin::Other);
+            }
+            16 | 19 | 20 => {
+                skip_class_bytes(data, offset, 2)?;
+                entries.push(CpEntryMin::Other);
+            }
+            17 => {
+                skip_class_bytes(data, offset, 4)?;
+                entries.push(CpEntryMin::Other);
+            }
+            _ => anyhow::bail!("unsupported constant pool tag: {}", tag),
+        }
+        index += 1;
+    }
+    Ok((entries, class_entries))
+}
+
+fn resolve_class_name_minimal(
+    entries: &[CpEntryMin],
+    class_entries: &[Option<u16>],
+    class_index: u16,
+) -> Result<String> {
+    let entry = class_entries
+        .get(class_index as usize)
+        .context("missing class entry")?;
+    let name_index = entry.context("missing class name index")?;
+    match entries.get(name_index as usize) {
+        Some(CpEntryMin::Utf8(value)) => Ok(value.clone()),
+        _ => anyhow::bail!("missing utf8 entry for class name"),
+    }
+}
+
+fn skip_interfaces(data: &[u8], offset: &mut usize) -> Result<()> {
+    let count = read_u16_class(data, offset)? as usize;
+    skip_class_bytes(data, offset, count * 2)?;
+    Ok(())
+}
+
+fn skip_fields(data: &[u8], offset: &mut usize) -> Result<()> {
+    let count = read_u16_class(data, offset)?;
+    for _ in 0..count {
+        skip_class_bytes(data, offset, 6)?;
+        skip_attributes(data, offset)?;
+    }
+    Ok(())
+}
+
+fn skip_methods(data: &[u8], offset: &mut usize) -> Result<()> {
+    let count = read_u16_class(data, offset)?;
+    for _ in 0..count {
+        skip_class_bytes(data, offset, 6)?;
+        skip_attributes(data, offset)?;
+    }
+    Ok(())
+}
+
+fn skip_attributes(data: &[u8], offset: &mut usize) -> Result<()> {
+    let count = read_u16_class(data, offset)?;
+    for _ in 0..count {
+        skip_class_bytes(data, offset, 2)?;
+        let length = read_u32_class(data, offset)? as usize;
+        skip_class_bytes(data, offset, length)?;
+    }
+    Ok(())
+}
+
+fn read_u8_class(data: &[u8], offset: &mut usize) -> Result<u8> {
+    let byte = *data.get(*offset).context("class file out of bounds")?;
+    *offset += 1;
+    Ok(byte)
+}
+
+fn read_u16_class(data: &[u8], offset: &mut usize) -> Result<u16> {
+    let bytes = read_bytes_class(data, offset, 2)?;
+    Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
+}
+
+fn read_u32_class(data: &[u8], offset: &mut usize) -> Result<u32> {
+    let bytes = read_bytes_class(data, offset, 4)?;
+    Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+}
+
+fn read_bytes_class<'a>(data: &'a [u8], offset: &mut usize, len: usize) -> Result<&'a [u8]> {
+    let start = *offset;
+    let end = start + len;
+    let slice = data.get(start..end).context("class file out of bounds")?;
+    *offset = end;
+    Ok(slice)
+}
+
+fn skip_class_bytes(data: &[u8], offset: &mut usize, len: usize) -> Result<()> {
+    read_bytes_class(data, offset, len)?;
+    Ok(())
+}
+
+fn parse_methods(
+    constant_pool: &[ConstantPool],
+    methods: &[jclassfile::methods::MethodInfo],
+) -> Result<Vec<Method>> {
     let mut parsed = Vec::new();
     for method in methods {
-        let name = resolve_utf8(constant_pool, method.name_index())
-            .context("resolve method name")?;
+        let name =
+            resolve_utf8(constant_pool, method.name_index()).context("resolve method name")?;
         let descriptor = resolve_utf8(constant_pool, method.descriptor_index())
             .context("resolve method descriptor")?;
+        let access_flags = method.access_flags();
+        let access = MethodAccess {
+            is_public: access_flags.contains(MethodFlags::ACC_PUBLIC),
+            is_static: access_flags.contains(MethodFlags::ACC_STATIC),
+            is_abstract: access_flags.contains(MethodFlags::ACC_ABSTRACT),
+        };
         let code = method
             .attributes()
             .iter()
             .find_map(|attribute| match attribute {
-                jclassfile::attributes::Attribute::Code { code, .. } => Some(code),
+                jclassfile::attributes::Attribute::Code {
+                    code,
+                    exception_table,
+                    ..
+                } => Some((code, exception_table)),
                 _ => None,
             });
-        let Some(code) = code else {
+        let Some((code, exception_table)) = code else {
             continue;
         };
-        let (instructions, calls) =
+        let (instructions, calls, string_literals) =
             parse_bytecode(code, constant_pool).context("parse bytecode")?;
-        let block = BasicBlock {
-            start_offset: 0,
-            end_offset: code.len() as u32,
-            instructions,
-        };
+        let exception_handlers =
+            parse_exception_handlers(exception_table, constant_pool).context("parse handlers")?;
+        let handler_offsets = exception_handlers
+            .iter()
+            .map(|handler| handler.handler_pc)
+            .collect::<Vec<_>>();
+        let cfg =
+            build_cfg(code, &instructions, &handler_offsets).context("build control flow graph")?;
         parsed.push(Method {
             name,
             descriptor,
-            blocks: vec![block],
+            access,
+            bytecode: code.clone(),
+            cfg,
             calls,
+            string_literals,
+            exception_handlers,
         });
     }
     Ok(parsed)
 }
 
-fn parse_bytecode(code: &[u8], constant_pool: &[ConstantPool]) -> Result<(Vec<Instruction>, Vec<CallSite>)> {
+fn parse_bytecode(
+    code: &[u8],
+    constant_pool: &[ConstantPool],
+) -> Result<(Vec<Instruction>, Vec<CallSite>, Vec<String>)> {
     let mut instructions = Vec::new();
     let mut calls = Vec::new();
+    let mut string_literals = Vec::new();
     let mut offset = 0usize;
     while offset < code.len() {
         let opcode = code[offset];
@@ -502,15 +747,18 @@ fn parse_bytecode(code: &[u8], constant_pool: &[ConstantPool]) -> Result<(Vec<In
             anyhow::bail!("invalid bytecode length at offset {}", offset);
         }
         let kind = match opcode {
-            0xb6 | 0xb7 | 0xb8 | 0xb9 => {
+            opcodes::INVOKEVIRTUAL
+            | opcodes::INVOKESPECIAL
+            | opcodes::INVOKESTATIC
+            | opcodes::INVOKEINTERFACE => {
                 let method_index = read_u16(code, offset + 1)?;
                 let method_ref = resolve_method_ref(constant_pool, method_index)
                     .context("resolve method ref")?;
                 let call_kind = match opcode {
-                    0xb6 => CallKind::Virtual,
-                    0xb7 => CallKind::Special,
-                    0xb8 => CallKind::Static,
-                    0xb9 => CallKind::Interface,
+                    opcodes::INVOKEVIRTUAL => CallKind::Virtual,
+                    opcodes::INVOKESPECIAL => CallKind::Special,
+                    opcodes::INVOKESTATIC => CallKind::Static,
+                    opcodes::INVOKEINTERFACE => CallKind::Interface,
                     _ => CallKind::Virtual,
                 };
                 let call = CallSite {
@@ -523,16 +771,35 @@ fn parse_bytecode(code: &[u8], constant_pool: &[ConstantPool]) -> Result<(Vec<In
                 calls.push(call.clone());
                 InstructionKind::Invoke(call)
             }
+            opcodes::LDC => {
+                let index = code.get(offset + 1).copied().context("ldc index")? as u16;
+                if let Some(value) = resolve_string_literal(constant_pool, index)? {
+                    string_literals.push(value.clone());
+                    InstructionKind::ConstString(value)
+                } else {
+                    InstructionKind::Other(opcode)
+                }
+            }
+            opcodes::LDC_W | opcodes::LDC2_W => {
+                let index = read_u16(code, offset + 1)?;
+                if let Some(value) = resolve_string_literal(constant_pool, index)? {
+                    string_literals.push(value.clone());
+                    InstructionKind::ConstString(value)
+                } else {
+                    InstructionKind::Other(opcode)
+                }
+            }
             _ => InstructionKind::Other(opcode),
         };
 
         instructions.push(Instruction {
             offset: start_offset,
+            opcode,
             kind,
         });
         offset += length;
     }
-    Ok((instructions, calls))
+    Ok((instructions, calls, string_literals))
 }
 
 /// Resolved constant pool method reference.
@@ -558,8 +825,7 @@ fn resolve_method_ref(constant_pool: &[ConstantPool], index: u16) -> Result<Meth
         _ => anyhow::bail!("unexpected method ref entry"),
     };
     let owner = resolve_class_name(constant_pool, class_index).context("resolve owner")?;
-    let (name_index, descriptor_index) =
-        resolve_name_and_type(constant_pool, name_and_type_index)?;
+    let (name_index, descriptor_index) = resolve_name_and_type(constant_pool, name_and_type_index)?;
     let name = resolve_utf8(constant_pool, name_index).context("resolve method name")?;
     let descriptor =
         resolve_utf8(constant_pool, descriptor_index).context("resolve method descriptor")?;
@@ -570,10 +836,7 @@ fn resolve_method_ref(constant_pool: &[ConstantPool], index: u16) -> Result<Meth
     })
 }
 
-fn resolve_name_and_type(
-    constant_pool: &[ConstantPool],
-    index: u16,
-) -> Result<(u16, u16)> {
+fn resolve_name_and_type(constant_pool: &[ConstantPool], index: u16) -> Result<(u16, u16)> {
     let entry = constant_pool
         .get(index as usize)
         .context("missing name and type entry")?;
@@ -586,14 +849,14 @@ fn resolve_name_and_type(
     }
 }
 
-fn opcode_length(code: &[u8], offset: usize) -> Result<usize> {
+pub(crate) fn opcode_length(code: &[u8], offset: usize) -> Result<usize> {
     let opcode = code[offset];
     let length = match opcode {
         0x00..=0x0f => 1,
         0x10 => 2,
         0x11 => 3,
-        0x12 => 2,
-        0x13 | 0x14 => 3,
+        opcodes::LDC => 2,
+        opcodes::LDC_W | opcodes::LDC2_W => 3,
         0x15..=0x19 => 2,
         0x1a..=0x35 => 1,
         0x36..=0x3a => 2,
@@ -604,14 +867,14 @@ fn opcode_length(code: &[u8], offset: usize) -> Result<usize> {
         0x84 => 3,
         0x85..=0x98 => 1,
         0x99..=0xa6 => 3,
-        0xa7 | 0xa8 => 3,
+        opcodes::GOTO | opcodes::JSR => 3,
         0xa9 => 2,
         0xaa => tableswitch_length(code, offset)?,
         0xab => lookupswitch_length(code, offset)?,
         0xac..=0xb1 => 1,
         0xb2..=0xb5 => 3,
-        0xb6..=0xb8 => 3,
-        0xb9 | 0xba => 5,
+        opcodes::INVOKEVIRTUAL | opcodes::INVOKESPECIAL | opcodes::INVOKESTATIC => 3,
+        opcodes::INVOKEINTERFACE | opcodes::INVOKEDYNAMIC => 5,
         0xbb => 3,
         0xbc => 2,
         0xbd => 3,
@@ -621,7 +884,7 @@ fn opcode_length(code: &[u8], offset: usize) -> Result<usize> {
         0xc4 => wide_length(code, offset)?,
         0xc5 => 4,
         0xc6 | 0xc7 => 3,
-        0xc8 | 0xc9 => 5,
+        opcodes::GOTO_W | opcodes::JSR_W => 5,
         0xca => 1,
         0xfe | 0xff => 1,
         _ => anyhow::bail!("unsupported opcode 0x{:02x}", opcode),
@@ -632,19 +895,25 @@ fn opcode_length(code: &[u8], offset: usize) -> Result<usize> {
 fn tableswitch_length(code: &[u8], offset: usize) -> Result<usize> {
     let padding = padding(offset);
     let base = offset + 1 + padding;
-    let low = read_u32(code, base + 4)?;
-    let high = read_u32(code, base + 8)?;
+    let low = read_i32(code, base + 4)?;
+    let high = read_i32(code, base + 8)?;
     let count = high
         .checked_sub(low)
         .and_then(|v| v.checked_add(1))
         .context("invalid tableswitch range")?;
+    if count < 0 {
+        anyhow::bail!("invalid tableswitch range");
+    }
     Ok(1 + padding + 12 + (count as usize) * 4)
 }
 
 fn lookupswitch_length(code: &[u8], offset: usize) -> Result<usize> {
     let padding = padding(offset);
     let base = offset + 1 + padding;
-    let npairs = read_u32(code, base + 4)?;
+    let npairs = read_i32(code, base + 4)?;
+    if npairs < 0 {
+        anyhow::bail!("invalid lookupswitch pairs");
+    }
     Ok(1 + padding + 8 + (npairs as usize) * 8)
 }
 
@@ -660,24 +929,66 @@ fn wide_length(code: &[u8], offset: usize) -> Result<usize> {
     }
 }
 
-fn padding(offset: usize) -> usize {
+pub(crate) fn padding(offset: usize) -> usize {
     (4 - ((offset + 1) % 4)) % 4
 }
 
-fn read_u16(code: &[u8], offset: usize) -> Result<u16> {
+pub(crate) fn read_u16(code: &[u8], offset: usize) -> Result<u16> {
     let slice = code
         .get(offset..offset + 2)
         .context("bytecode u16 out of bounds")?;
     Ok(u16::from_be_bytes([slice[0], slice[1]]))
 }
 
-fn read_u32(code: &[u8], offset: usize) -> Result<u32> {
+pub(crate) fn read_u32(code: &[u8], offset: usize) -> Result<u32> {
     let slice = code
         .get(offset..offset + 4)
         .context("bytecode u32 out of bounds")?;
     Ok(u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]))
 }
 
+fn read_i32(code: &[u8], offset: usize) -> Result<i32> {
+    let value = read_u32(code, offset)?;
+    Ok(i32::from_be_bytes(value.to_be_bytes()))
+}
+
+fn resolve_string_literal(constant_pool: &[ConstantPool], index: u16) -> Result<Option<String>> {
+    let entry = constant_pool
+        .get(index as usize)
+        .context("missing constant pool entry")?;
+    match entry {
+        ConstantPool::String { string_index } => {
+            let value = resolve_utf8(constant_pool, *string_index)?;
+            Ok(Some(value))
+        }
+        ConstantPool::Utf8 { value } => Ok(Some(value.clone())),
+        _ => Ok(None),
+    }
+}
+
+fn parse_exception_handlers(
+    table: &[jclassfile::attributes::ExceptionRecord],
+    constant_pool: &[ConstantPool],
+) -> Result<Vec<ExceptionHandler>> {
+    let mut handlers = Vec::new();
+    for entry in table {
+        let catch_type = if entry.catch_type() == 0 {
+            None
+        } else {
+            Some(
+                resolve_class_name(constant_pool, entry.catch_type())
+                    .context("resolve catch type")?,
+            )
+        };
+        handlers.push(ExceptionHandler {
+            start_pc: entry.start_pc() as u32,
+            end_pc: entry.end_pc() as u32,
+            handler_pc: entry.handler_pc() as u32,
+            catch_type,
+        });
+    }
+    Ok(handlers)
+}
 
 #[cfg(test)]
 mod tests {
@@ -714,7 +1025,7 @@ mod tests {
         let result = scan_inputs(&jar_path, &[]).expect("scan jar");
 
         assert!(result.class_count > 0);
-        assert!(!result.artifacts.is_empty());
+        assert_eq!(result.artifacts.len(), 1);
         let first_uri = result
             .artifacts
             .first()
@@ -851,10 +1162,9 @@ mod tests {
             return Ok(jar_path);
         }
 
-        let url = "https://repo.maven.apache.org/maven2/org/jspecify/jspecify/1.0.0/jspecify-1.0.0.jar";
-        let mut response = ureq::get(url)
-            .call()
-            .context("download jspecify jar")?;
+        let url =
+            "https://repo.maven.apache.org/maven2/org/jspecify/jspecify/1.0.0/jspecify-1.0.0.jar";
+        let mut response = ureq::get(url).call().context("download jspecify jar")?;
         if response.status().as_u16() >= 400 {
             anyhow::bail!(
                 "failed to download jspecify jar: HTTP {}",

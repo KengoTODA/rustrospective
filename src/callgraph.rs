@@ -1,96 +1,36 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::Result;
-use serde_sarif::sarif::{
-    CodeFlow, Location, LogicalLocation, Message, MultiformatMessageString, ReportingDescriptor,
-    Result as SarifResult, ThreadFlow, ThreadFlowLocation,
-};
-
-use crate::classpath::ClasspathIndex;
-use crate::ir::{CallKind, CallSite, Class, Method};
-
-/// SARIF payload for call graph emission.
-pub(crate) struct CallGraphResults {
-    pub(crate) rules: Vec<ReportingDescriptor>,
-    pub(crate) results: Vec<SarifResult>,
-}
-
-/// Build call graph results using a CHA baseline.
-pub(crate) fn call_graph_results(
-    classes: &[Class],
-    _classpath: &ClasspathIndex,
-) -> Result<CallGraphResults> {
-    let hierarchy = build_hierarchy(classes);
-    let methods = index_methods(classes);
-    let edges = build_edges(classes, &hierarchy, &methods);
-
-    if edges.is_empty() {
-        return Ok(CallGraphResults {
-            rules: Vec::new(),
-            results: Vec::new(),
-        });
-    }
-
-    let rule = ReportingDescriptor::builder()
-        .id("CHA_CALL_GRAPH")
-        .name("Call graph (CHA)")
-        .short_description(
-            MultiformatMessageString::builder()
-                .text("CHA call graph path")
-                .build(),
-        )
-        .build();
-
-    let mut results = Vec::new();
-    for edge in edges {
-        let caller = format_method_id(&edge.caller);
-        let callee = format_method_id(&edge.callee);
-        let message = Message::builder()
-            .text(format!("Call path: {caller} -> {callee}"))
-            .build();
-
-        let caller_location = ThreadFlowLocation::builder()
-            .location(Location::builder().logical_locations(vec![method_location(&edge.caller)]).build())
-            .kinds(vec!["call".to_string()])
-            .build();
-        let callee_location = ThreadFlowLocation::builder()
-            .location(Location::builder().logical_locations(vec![method_location(&edge.callee)]).build())
-            .kinds(vec!["call".to_string()])
-            .build();
-        let thread_flow = ThreadFlow::builder()
-            .locations(vec![caller_location, callee_location])
-            .build();
-        let code_flow = CodeFlow::builder().thread_flows(vec![thread_flow]).build();
-
-        let result = SarifResult::builder()
-            .message(message)
-            .rule_id("CHA_CALL_GRAPH")
-            .code_flows(vec![code_flow])
-            .build();
-        results.push(result);
-    }
-
-    Ok(CallGraphResults {
-        rules: vec![rule],
-        results,
-    })
-}
+use crate::ir::{CallKind, CallSite, Class};
 
 /// Unique identifier for a method in the classpath.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-struct MethodId {
-    class_name: String,
-    name: String,
-    descriptor: String,
+pub(crate) struct MethodId {
+    pub(crate) class_name: String,
+    pub(crate) name: String,
+    pub(crate) descriptor: String,
 }
 
 /// Directed call edge between caller and callee.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-struct CallEdge {
-    caller: MethodId,
-    callee: MethodId,
-    kind: CallKind,
-    offset: u32,
+pub(crate) struct CallEdge {
+    pub(crate) caller: MethodId,
+    pub(crate) callee: MethodId,
+    pub(crate) kind: CallKind,
+    pub(crate) offset: u32,
+}
+
+/// Call graph built from CHA on the parsed classpath.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CallGraph {
+    pub(crate) edges: BTreeSet<CallEdge>,
+}
+
+/// Build a call graph using a CHA baseline.
+pub(crate) fn build_call_graph(classes: &[Class]) -> CallGraph {
+    let hierarchy = build_hierarchy(classes);
+    let methods = index_methods(classes);
+    let edges = build_edges(classes, &hierarchy, &methods);
+    CallGraph { edges }
 }
 
 fn build_edges(
@@ -195,23 +135,10 @@ fn index_methods(classes: &[Class]) -> BTreeMap<MethodId, ()> {
     map
 }
 
-fn method_location(method: &MethodId) -> LogicalLocation {
-    LogicalLocation::builder()
-        .name(format_method_id(method))
-        .kind("function")
-        .build()
-}
-
-fn format_method_id(method: &MethodId) -> String {
-    format!(
-        "{}.{}{}",
-        method.class_name, method.name, method.descriptor
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ir::{CallSite, Method, MethodAccess};
 
     fn class_with_method(name: &str, super_name: Option<&str>, method: &Method) -> Class {
         Class {
@@ -228,7 +155,16 @@ mod tests {
         let caller = Method {
             name: "caller".to_string(),
             descriptor: "()V".to_string(),
-            blocks: Vec::new(),
+            access: MethodAccess {
+                is_public: true,
+                is_static: false,
+                is_abstract: false,
+            },
+            bytecode: Vec::new(),
+            cfg: crate::ir::ControlFlowGraph {
+                blocks: Vec::new(),
+                edges: Vec::new(),
+            },
             calls: vec![CallSite {
                 owner: "com/example/Base".to_string(),
                 name: "target".to_string(),
@@ -236,25 +172,39 @@ mod tests {
                 kind: CallKind::Virtual,
                 offset: 0,
             }],
+            string_literals: Vec::new(),
+            exception_handlers: Vec::new(),
         };
         let base_method = Method {
             name: "target".to_string(),
             descriptor: "()V".to_string(),
-            blocks: Vec::new(),
+            access: MethodAccess {
+                is_public: true,
+                is_static: false,
+                is_abstract: false,
+            },
+            bytecode: Vec::new(),
+            cfg: crate::ir::ControlFlowGraph {
+                blocks: Vec::new(),
+                edges: Vec::new(),
+            },
             calls: Vec::new(),
+            string_literals: Vec::new(),
+            exception_handlers: Vec::new(),
         };
         let subclass_method = base_method.clone();
         let classes = vec![
             class_with_method("com/example/Caller", None, &caller),
             class_with_method("com/example/Base", None, &base_method),
-            class_with_method("com/example/Sub", Some("com/example/Base"), &subclass_method),
+            class_with_method(
+                "com/example/Sub",
+                Some("com/example/Base"),
+                &subclass_method,
+            ),
         ];
-        let classpath = ClasspathIndex {
-            classes: BTreeMap::new(),
-        };
 
-        let results = call_graph_results(&classes, &classpath).expect("call graph");
+        let graph = build_call_graph(&classes);
 
-        assert!(!results.results.is_empty());
+        assert!(!graph.edges.is_empty());
     }
 }

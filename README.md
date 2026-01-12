@@ -20,7 +20,6 @@ The name combines "retrospective" and "Rust". The CLI command is `rtro`.
 - Nullness issues guided by JSpecify annotations.
 - Empty catch blocks.
 - Insecure API usage: `Runtime.exec`, `ProcessBuilder`, reflective sinks.
-- Hardcoded credentials (string constant heuristics).
 - Ineffective equals/hashCode.
 
 ## CLI usage

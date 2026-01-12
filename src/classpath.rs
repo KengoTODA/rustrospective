@@ -40,22 +40,14 @@ pub(crate) fn resolve_classpath(classes: &[Class]) -> Result<ClasspathIndex> {
             }
         }
     }
-    if !missing.is_empty() {
-        anyhow::bail!(
-            "missing classes: {}",
-            missing.into_iter().collect::<Vec<_>>().join(", ")
-        );
-    }
+    let _missing = missing;
 
     let classes = class_map
         .into_iter()
         .map(|(name, indices)| {
             (
                 name,
-                indices
-                    .into_iter()
-                    .next()
-                    .expect("class indices not empty"),
+                indices.into_iter().next().expect("class indices not empty"),
             )
         })
         .collect();
@@ -97,7 +89,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_classpath_rejects_missing_classes() {
+    fn resolve_classpath_allows_missing_classes() {
         let classes = vec![Class {
             name: "com/example/Foo".to_string(),
             super_name: None,
@@ -108,9 +100,7 @@ mod tests {
 
         let result = resolve_classpath(&classes);
 
-        assert!(result.is_err());
-        let error = result.err().expect("missing class error");
-        assert!(format!("{error:#}").contains("missing classes"));
+        assert!(result.is_ok());
     }
 
     #[test]

@@ -1,0 +1,21 @@
+/// JVM opcode constants shared across analysis rules.
+pub(crate) const NOP: u8 = 0x00;
+pub(crate) const GOTO: u8 = 0xa7;
+pub(crate) const JSR: u8 = 0xa8;
+pub(crate) const GOTO_W: u8 = 0xc8;
+pub(crate) const JSR_W: u8 = 0xc9;
+pub(crate) const IRETURN: u8 = 0xac;
+pub(crate) const LRETURN: u8 = 0xad;
+pub(crate) const FRETURN: u8 = 0xae;
+pub(crate) const DRETURN: u8 = 0xaf;
+pub(crate) const ARETURN: u8 = 0xb0;
+pub(crate) const RETURN: u8 = 0xb1;
+pub(crate) const ATHROW: u8 = 0xbf;
+pub(crate) const INVOKEVIRTUAL: u8 = 0xb6;
+pub(crate) const INVOKESPECIAL: u8 = 0xb7;
+pub(crate) const INVOKESTATIC: u8 = 0xb8;
+pub(crate) const INVOKEINTERFACE: u8 = 0xb9;
+pub(crate) const INVOKEDYNAMIC: u8 = 0xba;
+pub(crate) const LDC: u8 = 0x12;
+pub(crate) const LDC_W: u8 = 0x13;
+pub(crate) const LDC2_W: u8 = 0x14;

@@ -19,9 +19,17 @@ jobs:
         run: cargo build --release
       - name: Test
         run: cargo test
+      - name: Smoke test (SpotBugs jars)
+        run: bash scripts/smoke-spotbugs.sh
       - name: Upload artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: release-artifacts
           path: target/release/
+          if-no-files-found: warn
+      - name: Upload smoke test logs
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: smoke-test-logs
+          path: tests/smoketest/*.log
           if-no-files-found: warn

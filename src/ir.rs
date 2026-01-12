@@ -15,8 +15,36 @@ pub(crate) struct Class {
 pub(crate) struct Method {
     pub(crate) name: String,
     pub(crate) descriptor: String,
-    pub(crate) blocks: Vec<BasicBlock>,
+    pub(crate) access: MethodAccess,
+    pub(crate) bytecode: Vec<u8>,
+    pub(crate) cfg: ControlFlowGraph,
     pub(crate) calls: Vec<CallSite>,
+    pub(crate) string_literals: Vec<String>,
+    pub(crate) exception_handlers: Vec<ExceptionHandler>,
+}
+
+/// Method access flags used for rule filtering.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct MethodAccess {
+    pub(crate) is_public: bool,
+    pub(crate) is_static: bool,
+    pub(crate) is_abstract: bool,
+}
+
+/// Exception handler metadata from the Code attribute.
+#[derive(Clone, Debug)]
+pub(crate) struct ExceptionHandler {
+    pub(crate) start_pc: u32,
+    pub(crate) end_pc: u32,
+    pub(crate) handler_pc: u32,
+    pub(crate) catch_type: Option<String>,
+}
+
+/// Basic block graph for method bytecode.
+#[derive(Clone, Debug)]
+pub(crate) struct ControlFlowGraph {
+    pub(crate) blocks: Vec<BasicBlock>,
+    pub(crate) edges: Vec<FlowEdge>,
 }
 
 /// Basic block covering a range of bytecode offsets.
@@ -27,10 +55,27 @@ pub(crate) struct BasicBlock {
     pub(crate) instructions: Vec<Instruction>,
 }
 
+/// Edge between basic blocks.
+#[derive(Clone, Debug)]
+pub(crate) struct FlowEdge {
+    pub(crate) from: u32,
+    pub(crate) to: u32,
+    pub(crate) kind: EdgeKind,
+}
+
+/// Edge classification used for CFG inspection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub(crate) enum EdgeKind {
+    FallThrough,
+    Branch,
+    Exception,
+}
+
 /// Bytecode instruction captured for analysis.
 #[derive(Clone, Debug)]
 pub(crate) struct Instruction {
     pub(crate) offset: u32,
+    pub(crate) opcode: u8,
     pub(crate) kind: InstructionKind,
 }
 
@@ -38,6 +83,7 @@ pub(crate) struct Instruction {
 #[derive(Clone, Debug)]
 pub(crate) enum InstructionKind {
     Invoke(CallSite),
+    ConstString(String),
     Other(u8),
 }
 

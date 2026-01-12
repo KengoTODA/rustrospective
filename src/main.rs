@@ -1,6 +1,10 @@
 mod callgraph;
+mod cfg;
 mod classpath;
+mod engine;
 mod ir;
+mod opcodes;
+mod rules;
 mod scan;
 
 use std::collections::BTreeMap;
@@ -16,8 +20,8 @@ use serde_sarif::sarif::{
     Artifact, Invocation, PropertyBag, Run, Sarif, Tool, ToolComponent, SCHEMA_URL,
 };
 
-use crate::callgraph::call_graph_results;
 use crate::classpath::resolve_classpath;
+use crate::engine::{build_context, Engine};
 use crate::scan::scan_inputs;
 
 /// CLI arguments for rtro execution.
@@ -61,15 +65,19 @@ fn run(cli: Cli) -> Result<()> {
     let scan_duration_ms = scan_started_at.elapsed().as_millis();
     let artifact_count = scan.artifacts.len();
     let classpath_index = resolve_classpath(&scan.classes)?;
-    let call_graph = call_graph_results(&scan.classes, &classpath_index)?;
+    let classpath_class_count = classpath_index.classes.len();
+    let artifacts = scan.artifacts;
+    let context = build_context(scan.classes.clone(), classpath_index, &artifacts);
+    let engine = Engine::new();
+    let analysis = engine.analyze(context)?;
     let invocation_stats = InvocationStats {
         scan_duration_ms,
         class_count: scan.class_count,
         artifact_count,
-        classpath_class_count: classpath_index.classes.len(),
+        classpath_class_count,
     };
     let invocation = build_invocation(&invocation_stats);
-    let sarif = build_sarif(scan.artifacts, invocation, call_graph.rules, call_graph.results);
+    let sarif = build_sarif(artifacts, invocation, analysis.rules, analysis.results);
 
     let mut writer = output_writer(cli.output.as_deref())?;
     serde_json::to_writer_pretty(&mut writer, &sarif)
@@ -94,9 +102,11 @@ fn run(cli: Cli) -> Result<()> {
 fn output_writer(output: Option<&Path>) -> Result<Box<dyn Write>> {
     match output {
         Some(path) if path == Path::new("-") => Ok(Box::new(io::stdout())),
-        Some(path) => Ok(Box::new(
-            File::create(path).with_context(|| format!("failed to open {}", path.display()))?,
-        )),
+        Some(path) => {
+            Ok(Box::new(File::create(path).with_context(|| {
+                format!("failed to open {}", path.display())
+            })?))
+        }
         None => Ok(Box::new(io::stdout())),
     }
 }
@@ -128,7 +138,11 @@ fn build_invocation(stats: &InvocationStats) -> Invocation {
         .execution_successful(true)
         .arguments(arguments)
         .command_line(command_line)
-        .properties(PropertyBag::builder().additional_properties(properties).build())
+        .properties(
+            PropertyBag::builder()
+                .additional_properties(properties)
+                .build(),
+        )
         .build()
 }
 
@@ -186,6 +200,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use crate::classpath::resolve_classpath;
+    use crate::engine::{build_context, Engine};
     use crate::scan::scan_inputs;
 
     #[test]
@@ -234,13 +249,16 @@ mod tests {
 
         let scan = scan_inputs(&temp_dir, &[]).expect("scan classes");
         let classpath = resolve_classpath(&scan.classes).expect("resolve classpath");
-        let call_graph = call_graph_results(&scan.classes, &classpath).expect("call graph");
+        let artifacts = scan.artifacts.clone();
+        let context = build_context(scan.classes.clone(), classpath, &artifacts);
+        let engine = Engine::new();
+        let analysis = engine.analyze(context).expect("analysis");
         let invocation = Invocation::builder()
             .execution_successful(true)
             .arguments(Vec::<String>::new())
             .build();
-        let artifacts = normalize_artifacts(scan.artifacts);
-        let sarif = build_sarif(artifacts, invocation, call_graph.rules, call_graph.results);
+        let artifacts = normalize_artifacts(artifacts);
+        let sarif = build_sarif(artifacts, invocation, analysis.rules, analysis.results);
         let actual = serde_json::to_string_pretty(&sarif).expect("serialize SARIF");
         let snapshot_path = snapshot_path("callgraph.sarif");
 
@@ -349,8 +367,7 @@ mod tests {
         fn add_method_ref(&mut self, class: &str, name: &str, descriptor: &str) -> u16 {
             let class_index = self.add_class(class);
             let name_and_type = self.add_name_and_type(name, descriptor);
-            self.cp
-                .push(CpEntry::MethodRef(class_index, name_and_type));
+            self.cp.push(CpEntry::MethodRef(class_index, name_and_type));
             self.cp.len() as u16
         }
 
@@ -475,13 +492,36 @@ mod tests {
             .map(|mut artifact| {
                 if let Some(location) = artifact.location.as_mut() {
                     if let Some(uri) = &location.uri {
-                        if let Some(name) = PathBuf::from(uri).file_name() {
-                            location.uri = Some(name.to_string_lossy().to_string());
+                        if let Some(name) = artifact_basename(uri) {
+                            location.uri = Some(name);
                         }
                     }
                 }
                 artifact
             })
             .collect()
+    }
+
+    fn artifact_basename(uri: &str) -> Option<String> {
+        if let Some(rest) = uri.strip_prefix("jar:") {
+            let entry = rest.split("!/").nth(1)?;
+            return Some(
+                PathBuf::from(entry)
+                    .file_name()?
+                    .to_string_lossy()
+                    .to_string(),
+            );
+        }
+        if let Some(rest) = uri.strip_prefix("file://") {
+            return Some(
+                PathBuf::from(rest)
+                    .file_name()?
+                    .to_string_lossy()
+                    .to_string(),
+            );
+        }
+        PathBuf::from(uri)
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
     }
 }

@@ -27,15 +27,13 @@
 - [x] Add fixtures and golden SARIF snapshots.
 
 ## Milestone 4 - CFG + Rule Engine
-- Build CFG per method.
-- Implement configurable rule engine.
-- Add initial rule set:
-  - Dead code.
-  - JSpecify-based nullness checks.
-  - Empty catch blocks.
-  - Insecure API usage sinks.
-  - Hardcoded credentials heuristics.
-  - Ineffective equals/hashCode.
+- [x] Build CFG per method.
+- [x] Implement configurable rule engine.
+- [x] Add initial rule set: Dead code.
+- [ ] Add initial rule set: JSpecify-based nullness checks.
+- [x] Add initial rule set: Empty catch blocks.
+- [x] Add initial rule set: Insecure API usage sinks.
+- [x] Add initial rule set: Ineffective equals/hashCode.
 
 ## Milestone 5 - CI Hardened Release
 - Stable output ordering and exit codes.

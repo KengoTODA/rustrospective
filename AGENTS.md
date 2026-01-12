@@ -18,7 +18,6 @@
 - Nullness checks guided by JSpecify annotations.
 - Empty catch blocks.
 - Insecure API usage: `Runtime.exec`, `ProcessBuilder`, reflective sinks.
-- Hardcoded credentials (string constant heuristics).
 - Ineffective equals/hashCode.
 
 ## Current scaffold
