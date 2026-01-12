@@ -622,14 +622,17 @@ mod tests {
         }
 
         let url = "https://repo.maven.apache.org/maven2/org/jspecify/jspecify/1.0.0/jspecify-1.0.0.jar";
-        let response = ureq::get(url)
+        let mut response = ureq::get(url)
             .call()
             .context("download jspecify jar")?;
-        if response.status() >= 400 {
-            anyhow::bail!("failed to download jspecify jar: HTTP {}", response.status());
+        if response.status().as_u16() >= 400 {
+            anyhow::bail!(
+                "failed to download jspecify jar: HTTP {}",
+                response.status()
+            );
         }
 
-        let mut reader = response.into_reader();
+        let mut reader = response.body_mut().as_reader();
         let mut bytes = Vec::new();
         reader
             .read_to_end(&mut bytes)
