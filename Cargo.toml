@@ -16,7 +16,7 @@ zip = "7.0.0"
 
 [dev-dependencies]
 ureq = "=3.1.4"
-tempfile = "3.23.0"
+tempfile = "=3.23.0"
 
 [[bin]]
 name = "rtro"
