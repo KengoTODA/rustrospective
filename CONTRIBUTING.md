@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in rustrospective.
+Thanks for your interest in inspequte.
 
 ## Commit messages
 We follow Conventional Commits 1.0.0. Examples:

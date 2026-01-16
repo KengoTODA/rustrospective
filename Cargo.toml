@@ -1,5 +1,5 @@
 [package]
-name = "rustrospective"
+name = "inspequte"
 version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0-only"
@@ -19,5 +19,5 @@ ureq = "=3.1.4"
 tempfile = "3.23.0"
 
 [[bin]]
-name = "rtro"
+name = "inspequte"
 path = "src/main.rs"

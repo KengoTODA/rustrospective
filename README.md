@@ -1,4 +1,4 @@
-# rustrospective
+# inspequte
 
 [![CI](https://github.com/KengoTODA/rustrospective/actions/workflows/ci.yml/badge.svg)](https://github.com/KengoTODA/rustrospective/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.en.html)
@@ -12,11 +12,11 @@
 >
 > Do **NOT** use this code in production environments.
 
-rustrospective is a fast, CLI-first static analysis tool for JVM class and JAR files.
+inspequte is a fast, CLI-first static analysis tool for JVM class and JAR files.
 It focuses on CI/CD speed, deterministic output, and SARIF-only reporting for global
 standard compatibility.
 
-The name combines "retrospective" and "Rust". The CLI command is `rtro`.
+The name combines "inspect" and "qute". The CLI command is `inspequte`.
 
 ## Goals
 - Fast startup and analysis for CI pipelines.
@@ -32,7 +32,7 @@ The name combines "retrospective" and "Rust". The CLI command is `rtro`.
 
 ## CLI usage
 ```
-rtro --input app.jar --classpath lib/ --output results.sarif
+inspequte --input app.jar --classpath lib/ --output results.sarif
 ```
 
 ## SARIF output (example)
@@ -44,8 +44,8 @@ rtro --input app.jar --classpath lib/ --output results.sarif
     {
       "tool": {
         "driver": {
-          "name": "rustrospective",
-          "informationUri": "https://github.com/KengoTODA/rustrospective"
+          "name": "inspequte",
+          "informationUri": "https://github.com/KengoTODA/inspequte"
         }
       },
       "results": []
@@ -56,7 +56,7 @@ rtro --input app.jar --classpath lib/ --output results.sarif
 
 ## CI integration (GitHub Actions)
 ```yaml
-- name: Run rustrospective
+- name: Run inspequte
   run: |
     cargo run --release -- \
       --input app.jar \

@@ -1,14 +1,14 @@
 # AGENTS
 
 ## Project context
-- Repo: rustrospective (CLI command: `rtro`).
+- Repo: inspequte (CLI command: `inspequte`).
 - Purpose: fast, CLI-first static analysis for JVM class/JAR files.
 - Output: SARIF v2.1.0 only.
 - License: AGPL-3.0.
 - Commit style: Conventional Commits v1.0.0.
 
 ## Decisions
-- `rtro` is the CLI command name.
+- `inspequte` is the CLI command name.
 - Keep `--timing` option in Milestone 1.
 - Do not document multithreading for now.
 - Add documentation comments to each struct.
@@ -24,7 +24,7 @@
 - `README.md` includes goals, planned analyses, CLI usage, SARIF example, and CI snippet.
 - `CONTRIBUTING.md` covers Conventional Commits and AGPL contribution terms.
 - `MILESTONES.md` tracks milestones.
-- `Cargo.toml` declares the crate and `rtro` binary.
+- `Cargo.toml` declares the crate and `inspequte` binary.
 - `.github/workflows/ci.yml` builds, tests, and uploads release artifacts.
 
 ## Next focus (Milestone 1)

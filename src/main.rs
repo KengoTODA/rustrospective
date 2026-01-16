@@ -27,10 +27,10 @@ use crate::classpath::resolve_classpath;
 use crate::engine::{build_context, Engine};
 use crate::scan::scan_inputs;
 
-/// CLI arguments for rtro execution.
+/// CLI arguments for inspequte execution.
 #[derive(Parser, Debug)]
 #[command(
-    name = "rtro",
+    name = "inspequte",
     about = "Fast, deterministic SARIF output for JVM class files and JAR files analysis.",
     version
 )]
@@ -129,14 +129,14 @@ fn build_invocation(stats: &InvocationStats) -> Invocation {
     let arguments: Vec<String> = std::env::args().collect();
     let command_line = arguments.join(" ");
     let mut properties = BTreeMap::new();
-    properties.insert("rtro.scan_ms".to_string(), json!(stats.scan_duration_ms));
-    properties.insert("rtro.class_count".to_string(), json!(stats.class_count));
+    properties.insert("inspequte.scan_ms".to_string(), json!(stats.scan_duration_ms));
+    properties.insert("inspequte.class_count".to_string(), json!(stats.class_count));
     properties.insert(
-        "rtro.artifact_count".to_string(),
+        "inspequte.artifact_count".to_string(),
         json!(stats.artifact_count),
     );
     properties.insert(
-        "rtro.classpath_class_count".to_string(),
+        "inspequte.classpath_class_count".to_string(),
         json!(stats.classpath_class_count),
     );
 
@@ -160,13 +160,13 @@ fn build_sarif(
 ) -> Sarif {
     let driver = if rules.is_empty() {
         ToolComponent::builder()
-            .name("rustrospective")
-            .information_uri("https://github.com/KengoTODA/rustrospective")
+            .name("inspequte")
+            .information_uri("https://github.com/KengoTODA/inspequte")
             .build()
     } else {
         ToolComponent::builder()
-            .name("rustrospective")
-            .information_uri("https://github.com/KengoTODA/rustrospective")
+            .name("inspequte")
+            .information_uri("https://github.com/KengoTODA/inspequte")
             .rules(rules)
             .build()
     };
@@ -222,10 +222,10 @@ mod tests {
 
         assert_eq!(value["version"], "2.1.0");
         assert_eq!(value["$schema"], SCHEMA_URL);
-        assert_eq!(value["runs"][0]["tool"]["driver"]["name"], "rustrospective");
+        assert_eq!(value["runs"][0]["tool"]["driver"]["name"], "inspequte");
         assert_eq!(
             value["runs"][0]["tool"]["driver"]["informationUri"],
-            "https://github.com/KengoTODA/rustrospective"
+            "https://github.com/KengoTODA/inspequte"
         );
         assert!(value["runs"][0]["results"]
             .as_array()
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn sarif_callgraph_snapshot() {
         let temp_dir = std::env::temp_dir().join(format!(
-            "rtro-test-{}",
+            "inspequte-test-{}",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("time")
@@ -268,7 +268,7 @@ mod tests {
         let actual = serde_json::to_string_pretty(&sarif).expect("serialize SARIF");
         let snapshot_path = snapshot_path("callgraph.sarif");
 
-        if std::env::var("RTRO_UPDATE_SNAPSHOTS").is_ok() {
+        if std::env::var("INSPEQUTE_UPDATE_SNAPSHOTS").is_ok() {
             fs::create_dir_all(snapshot_path.parent().expect("snapshot parent"))
                 .expect("create snapshot dir");
             let mut file = fs::File::create(&snapshot_path).expect("create snapshot");

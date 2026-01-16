@@ -11,8 +11,8 @@
       "results": [],
       "tool": {
         "driver": {
-          "informationUri": "https://github.com/KengoTODA/rustrospective",
-          "name": "rustrospective",
+          "informationUri": "https://github.com/KengoTODA/inspequte",
+          "name": "inspequte",
           "rules": [
             {
               "id": "DEAD_CODE",
