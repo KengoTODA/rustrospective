@@ -269,18 +269,21 @@ fn check_method_flow(
     Ok(results)
 }
 
+/// Nullness state at a program point.
 #[derive(Clone, Debug, PartialEq)]
 struct State {
     locals: Vec<Nullness>,
     stack: Vec<StackValue>,
 }
 
+/// Operand stack entry with optional local aliasing metadata.
 #[derive(Clone, Debug, PartialEq)]
 struct StackValue {
     nullness: Nullness,
     local: Option<usize>,
 }
 
+/// Transfer output for a basic block, including emitted results.
 #[derive(Clone)]
 struct BlockTransfer {
     out_state: State,
@@ -288,6 +291,7 @@ struct BlockTransfer {
     results: Vec<SarifResult>,
 }
 
+/// Nullness refinement applied on conditional branch edges.
 #[derive(Clone)]
 struct BranchRefinement {
     local: usize,

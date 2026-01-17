@@ -407,7 +407,6 @@ fn is_jar_path(path: &Path) -> bool {
 }
 
 /// Parsed class data extracted from class file bytes.
-/// Parsed class data extracted from class file bytes.
 struct ParsedClass {
     name: String,
     super_name: Option<String>,
@@ -724,8 +723,7 @@ fn parse_fields(
 ) -> Result<Vec<Field>> {
     let mut parsed = Vec::new();
     for field in fields {
-        let name =
-            resolve_utf8(constant_pool, field.name_index()).context("resolve field name")?;
+        let name = resolve_utf8(constant_pool, field.name_index()).context("resolve field name")?;
         let descriptor = resolve_utf8(constant_pool, field.descriptor_index())
             .context("resolve field descriptor")?;
         let access_flags = field.access_flags();

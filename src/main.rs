@@ -112,9 +112,11 @@ fn run_scan(args: ScanArgs) -> Result<()> {
 
     let started_at = Instant::now();
     let mut analysis = analyze(&args.input.input, &args.input.classpath)?;
+    let baseline_started_at = Instant::now();
     if let Some(baseline) = load_baseline(&args.baseline)? {
         analysis.results = baseline.filter(analysis.results);
     }
+    let baseline_duration_ms = baseline_started_at.elapsed().as_millis();
 
     let invocation = build_invocation(&analysis.invocation_stats);
     let sarif = build_sarif(
@@ -138,10 +140,13 @@ fn run_scan(args: ScanArgs) -> Result<()> {
 
     if args.timing && !args.quiet {
         eprintln!(
-            "timing: total_ms={} scan_ms={} classpath_ms={} write_ms={} (classes={} artifacts={})",
+            "timing: total_ms={} scan_ms={} classpath_ms={} analysis_load_ms={} analysis_rules_ms={} baseline_ms={} write_ms={} (classes={} artifacts={})",
             started_at.elapsed().as_millis(),
             analysis.invocation_stats.scan_duration_ms,
             analysis.invocation_stats.classpath_duration_ms,
+            analysis.invocation_stats.analysis_load_duration_ms,
+            analysis.invocation_stats.analysis_rules_duration_ms,
+            baseline_duration_ms,
             write_duration_ms,
             analysis.invocation_stats.class_count,
             analysis.invocation_stats.artifact_count
@@ -188,12 +193,18 @@ fn analyze(input: &Path, classpath: &[PathBuf]) -> Result<AnalysisOutput> {
     let classpath_duration_ms = classpath_started_at.elapsed().as_millis();
     let classpath_class_count = classpath_index.classes.len();
     let artifacts = scan.artifacts;
+    let analysis_load_started_at = Instant::now();
     let context = build_context(scan.classes.clone(), classpath_index, &artifacts);
+    let analysis_load_duration_ms = analysis_load_started_at.elapsed().as_millis();
+    let analysis_rules_started_at = Instant::now();
     let engine = Engine::new();
     let analysis = engine.analyze(context)?;
+    let analysis_rules_duration_ms = analysis_rules_started_at.elapsed().as_millis();
     let invocation_stats = InvocationStats {
         scan_duration_ms,
         classpath_duration_ms,
+        analysis_load_duration_ms,
+        analysis_rules_duration_ms,
         class_count: scan.class_count,
         artifact_count,
         classpath_class_count,
@@ -223,6 +234,8 @@ fn output_writer(output: Option<&Path>) -> Result<Box<dyn Write>> {
 struct InvocationStats {
     scan_duration_ms: u128,
     classpath_duration_ms: u128,
+    analysis_load_duration_ms: u128,
+    analysis_rules_duration_ms: u128,
     class_count: usize,
     artifact_count: usize,
     classpath_class_count: usize,
@@ -239,6 +252,14 @@ fn build_invocation(stats: &InvocationStats) -> Invocation {
     properties.insert(
         "inspequte.classpath_ms".to_string(),
         json!(stats.classpath_duration_ms),
+    );
+    properties.insert(
+        "inspequte.analysis_load_ms".to_string(),
+        json!(stats.analysis_load_duration_ms),
+    );
+    properties.insert(
+        "inspequte.analysis_rules_ms".to_string(),
+        json!(stats.analysis_rules_duration_ms),
     );
     properties.insert(
         "inspequte.class_count".to_string(),
@@ -350,6 +371,8 @@ mod tests {
         let invocation = build_invocation(&InvocationStats {
             scan_duration_ms: 0,
             classpath_duration_ms: 0,
+            analysis_load_duration_ms: 0,
+            analysis_rules_duration_ms: 0,
             class_count: 0,
             artifact_count: 0,
             classpath_class_count: 0,
