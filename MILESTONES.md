@@ -39,11 +39,12 @@
 - [x] Stable output ordering and exit codes.
 - [x] Optional SARIF schema validation.
 - [ ] Caching for classpath resolution.
+    - Skip this because performance is not improved according to the benchmark
 - [x] Benchmarks and performance baselines.
-- [ ] CI integration examples.
+- [x] CI integration examples.
 
 ## Milestone 6 - 1.0 Release
 - Tag `v1.0.0` with release notes.
 - Publish usage examples and SARIF viewer guidance.
-- Document bytecode/JDK compatibility.
+- [x] Document bytecode/JDK compatibility.
 - [x] Setup `release-please` to publish changes to GitHub Releases that enables release immutability.

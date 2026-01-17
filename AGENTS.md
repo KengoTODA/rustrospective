@@ -29,4 +29,3 @@
 
 ## Next focus (Milestone 5)
 - Caching for classpath resolution.
-- CI integration examples.

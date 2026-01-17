@@ -1,6 +1,7 @@
 # inspequte
 
 [![CI](https://github.com/KengoTODA/inspequte/actions/workflows/ci.yml/badge.svg)](https://github.com/KengoTODA/inspequte/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/inspequte.svg)](https://crates.io/crates/inspequte)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.en.html)
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg)](https://www.conventionalcommits.org/en/v1.0.0/)
 
@@ -29,6 +30,11 @@ The name combines "inspect" and "qute". The CLI command is `inspequte`.
 - Empty catch blocks.
 - Insecure API usage: `Runtime.exec`, `ProcessBuilder`, reflective sinks.
 - Ineffective equals/hashCode.
+
+## Bytecode/JDK compatibility
+- Supports JVM class files up to Java 21 (major version 65).
+- Requires a Java 21 toolchain when compiling test harness sources via `JAVA_HOME`.
+- Some advanced bytecode attributes may still be skipped in future releases.
 
 ## CLI usage
 ```
@@ -66,6 +72,24 @@ inspequte --input app.jar --classpath lib/ --output results.sarif
 - name: Run inspequte
   run: |
     cargo run --release -- \
+      --input app.jar \
+      --classpath lib/ \
+      --output results.sarif
+```
+
+### Upload SARIF to GitHub Code Scanning
+```yaml
+- name: Upload SARIF
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: results.sarif
+```
+
+### Validate SARIF during CI (optional)
+```yaml
+- name: Run inspequte with schema validation
+  run: |
+    INSPEQUTE_VALIDATE_SARIF=1 cargo run --release -- \
       --input app.jar \
       --classpath lib/ \
       --output results.sarif
