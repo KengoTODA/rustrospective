@@ -12,6 +12,8 @@
 - Keep `--timing` option in Milestone 1.
 - Do not document multithreading for now.
 - Add documentation comments to each struct.
+- Use Java 21 for the test harness via `JAVA_HOME`.
+- Use release-please with crates.io trusted publisher (OIDC).
 
 ## Planned analyses (pre-1.0)
 - Dead code: unreachable methods/classes, unused private methods/fields.
