@@ -1,7 +1,7 @@
 [package]
 name = "inspequte"
 version = "0.2.1"
-edition = "2021"
+edition = "2024"
 description = "Fast, CLI-first static analysis for JVM class and JAR files."
 license = "AGPL-3.0-only"
 readme = "README.md"
