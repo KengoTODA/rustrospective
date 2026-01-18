@@ -29,7 +29,7 @@ use serde_sarif::sarif::{
 
 use crate::baseline::{load_baseline, write_baseline};
 use crate::classpath::resolve_classpath;
-use crate::engine::{Engine, build_context};
+use crate::engine::{Engine, build_context_with_timings};
 use crate::scan::scan_inputs;
 
 const DEFAULT_BASELINE_PATH: &str = ".inspequte/baseline.json";
@@ -140,11 +140,12 @@ fn run_scan(args: ScanArgs) -> Result<()> {
 
     if args.timing && !args.quiet {
         eprintln!(
-            "timing: total_ms={} scan_ms={} classpath_ms={} analysis_load_ms={} analysis_rules_ms={} baseline_ms={} write_ms={} (classes={} artifacts={})",
+            "timing: total_ms={} scan_ms={} classpath_ms={} analysis_callgraph_ms={} analysis_artifact_ms={} analysis_rules_ms={} baseline_ms={} write_ms={} (classes={} artifacts={})",
             started_at.elapsed().as_millis(),
             analysis.invocation_stats.scan_duration_ms,
             analysis.invocation_stats.classpath_duration_ms,
-            analysis.invocation_stats.analysis_load_duration_ms,
+            analysis.invocation_stats.analysis_call_graph_duration_ms,
+            analysis.invocation_stats.analysis_artifact_duration_ms,
             analysis.invocation_stats.analysis_rules_duration_ms,
             baseline_duration_ms,
             write_duration_ms,
@@ -193,9 +194,9 @@ fn analyze(input: &Path, classpath: &[PathBuf]) -> Result<AnalysisOutput> {
     let classpath_duration_ms = classpath_started_at.elapsed().as_millis();
     let classpath_class_count = classpath_index.classes.len();
     let artifacts = scan.artifacts;
-    let analysis_load_started_at = Instant::now();
-    let context = build_context(scan.classes.clone(), classpath_index, &artifacts);
-    let analysis_load_duration_ms = analysis_load_started_at.elapsed().as_millis();
+    let classes = scan.classes;
+    let (context, context_timings) =
+        build_context_with_timings(classes, classpath_index, &artifacts);
     let analysis_rules_started_at = Instant::now();
     let engine = Engine::new();
     let analysis = engine.analyze(context)?;
@@ -203,7 +204,8 @@ fn analyze(input: &Path, classpath: &[PathBuf]) -> Result<AnalysisOutput> {
     let invocation_stats = InvocationStats {
         scan_duration_ms,
         classpath_duration_ms,
-        analysis_load_duration_ms,
+        analysis_call_graph_duration_ms: context_timings.call_graph_duration_ms,
+        analysis_artifact_duration_ms: context_timings.artifact_duration_ms,
         analysis_rules_duration_ms,
         class_count: scan.class_count,
         artifact_count,
@@ -234,7 +236,8 @@ fn output_writer(output: Option<&Path>) -> Result<Box<dyn Write>> {
 struct InvocationStats {
     scan_duration_ms: u128,
     classpath_duration_ms: u128,
-    analysis_load_duration_ms: u128,
+    analysis_call_graph_duration_ms: u128,
+    analysis_artifact_duration_ms: u128,
     analysis_rules_duration_ms: u128,
     class_count: usize,
     artifact_count: usize,
@@ -254,8 +257,12 @@ fn build_invocation(stats: &InvocationStats) -> Invocation {
         json!(stats.classpath_duration_ms),
     );
     properties.insert(
-        "inspequte.analysis_load_ms".to_string(),
-        json!(stats.analysis_load_duration_ms),
+        "inspequte.analysis_callgraph_ms".to_string(),
+        json!(stats.analysis_call_graph_duration_ms),
+    );
+    properties.insert(
+        "inspequte.analysis_artifact_ms".to_string(),
+        json!(stats.analysis_artifact_duration_ms),
     );
     properties.insert(
         "inspequte.analysis_rules_ms".to_string(),
@@ -371,7 +378,8 @@ mod tests {
         let invocation = build_invocation(&InvocationStats {
             scan_duration_ms: 0,
             classpath_duration_ms: 0,
-            analysis_load_duration_ms: 0,
+            analysis_call_graph_duration_ms: 0,
+            analysis_artifact_duration_ms: 0,
             analysis_rules_duration_ms: 0,
             class_count: 0,
             artifact_count: 0,

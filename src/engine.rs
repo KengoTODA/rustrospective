@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::Instant;
 
 use anyhow::Result;
 use serde_sarif::sarif::Artifact;
@@ -23,6 +24,12 @@ pub(crate) struct AnalysisContext {
     artifact_uris: BTreeMap<i64, String>,
     analysis_target_artifacts: BTreeSet<i64>,
     artifact_parents: BTreeMap<i64, i64>,
+}
+
+/// Timing breakdown for context construction.
+pub(crate) struct ContextTimings {
+    pub(crate) call_graph_duration_ms: u128,
+    pub(crate) artifact_duration_ms: u128,
 }
 
 /// Analysis engine that executes configured rules.
@@ -79,21 +86,40 @@ pub(crate) struct EngineOutput {
     pub(crate) results: Vec<SarifResult>,
 }
 
+#[cfg(test)]
 pub(crate) fn build_context(
     classes: Vec<Class>,
     classpath: ClasspathIndex,
     artifacts: &[Artifact],
 ) -> AnalysisContext {
+    let (context, _) = build_context_with_timings(classes, classpath, artifacts);
+    context
+}
+
+pub(crate) fn build_context_with_timings(
+    classes: Vec<Class>,
+    classpath: ClasspathIndex,
+    artifacts: &[Artifact],
+) -> (AnalysisContext, ContextTimings) {
+    let call_graph_started_at = Instant::now();
     let call_graph = build_call_graph(&classes);
+    let call_graph_duration_ms = call_graph_started_at.elapsed().as_millis();
+    let artifact_started_at = Instant::now();
     let (analysis_target_artifacts, artifact_parents, artifact_uris) = analyze_artifacts(artifacts);
-    AnalysisContext {
+    let artifact_duration_ms = artifact_started_at.elapsed().as_millis();
+    let timings = ContextTimings {
+        call_graph_duration_ms,
+        artifact_duration_ms,
+    };
+    let context = AnalysisContext {
         classes,
         classpath,
         call_graph,
         artifact_uris,
         analysis_target_artifacts,
         artifact_parents,
-    }
+    };
+    (context, timings)
 }
 
 fn rule_descriptor(metadata: &RuleMetadata) -> ReportingDescriptor {
