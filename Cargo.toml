@@ -1,6 +1,6 @@
 [package]
 name = "inspequte"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 description = "Fast, CLI-first static analysis for JVM class and JAR files."
 license = "AGPL-3.0-only"

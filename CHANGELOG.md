@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/KengoTODA/inspequte/compare/inspequte-v0.3.0...inspequte-v0.4.0) (2026-01-18)
+
+
+### Features
+
+* split analysis load timings ([7383a12](https://github.com/KengoTODA/inspequte/commit/7383a126339176fbb6ff23d0da82ee30e71f1a51))
+* split analysis timing metrics ([3cd3f16](https://github.com/KengoTODA/inspequte/commit/3cd3f16a50187fdfd12ec2615a670710781ebc64))
+
+
+### Bug Fixes
+
+* reduce callgraph edge overhead ([ddd6e90](https://github.com/KengoTODA/inspequte/commit/ddd6e907b85ad8025753e2141f68b7c26bf7888d))
+
 ## [0.3.0](https://github.com/KengoTODA/inspequte/compare/inspequte-v0.2.1...inspequte-v0.3.0) (2026-01-17)
 
 
